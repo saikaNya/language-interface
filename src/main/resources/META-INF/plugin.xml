@@ -12,4 +12,14 @@
         <toolWindow factoryClass="com.github.saikanya.languageinterface.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
         <postStartupActivity implementation="com.github.saikanya.languageinterface.startup.MyProjectActivity" />
     </extensions>
+
+    <actions>
+        <action id="HelloWorldAction"
+                class="com.github.saikanya.languageinterface.actions.HelloWorldAction"
+                text="Hello World"
+                description="弹出 Hello World 提示框">
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
+        </action>
+    </actions>
 </idea-plugin>
