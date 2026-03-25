@@ -5,12 +5,14 @@
     <vendor>saikanya</vendor>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.java</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow factoryClass="com.github.saikanya.languageinterface.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
         <postStartupActivity implementation="com.github.saikanya.languageinterface.startup.MyProjectActivity" />
+        <httpRequestHandler implementation="com.github.saikanya.languageinterface.api.SearchClassHandler"/>
     </extensions>
 
     <actions>
