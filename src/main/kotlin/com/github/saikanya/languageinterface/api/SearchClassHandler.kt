@@ -14,13 +14,14 @@ import io.netty.handler.codec.http.*
 import org.jetbrains.ide.HttpRequestHandler
 
 /**
- * @author heyi
+ * @author saikanya
+ * @date 2024/6/30 17:00
  */
 class SearchClassHandler : HttpRequestHandler() {
 
     companion object {
         private const val PATH_PREFIX = "/api/language-interface/search-class"
-        private const val DEFAULT_LIMIT = 50
+        private const val DEFAULT_LIMIT = 200
         private val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
         private val LOG = logger<SearchClassHandler>()
     }
@@ -55,7 +56,11 @@ class SearchClassHandler : HttpRequestHandler() {
         }
 
         if (DumbService.isDumb(project)) {
-            sendJson(context, mapOf("error" to "Indexing in progress, please try again later"), HttpResponseStatus.SERVICE_UNAVAILABLE)
+            sendJson(
+                context,
+                mapOf("error" to "Indexing in progress, please try again later"),
+                HttpResponseStatus.SERVICE_UNAVAILABLE
+            )
             return true
         }
 
