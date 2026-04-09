@@ -1,6 +1,6 @@
 package com.github.saikanya.languageinterface.api
 
-import com.google.gson.GsonBuilder
+import com.google.gson.JsonParser
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.DumbService
@@ -10,7 +10,6 @@ import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.psi.*
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
-import io.netty.buffer.Unpooled
 import io.netty.channel.ChannelHandlerContext
 import io.netty.handler.codec.http.*
 import org.jetbrains.ide.HttpRequestHandler
@@ -18,9 +17,10 @@ import org.jetbrains.ide.HttpRequestHandler
 /**
  * 通过 FQN 或文件路径获取类文件源代码内容
  *
- * GET /api/language-interface/class-content?fqn=com.example.MyClass&project=myProject
- * GET /api/language-interface/class-content?path=/path/to/MyClass.java&project=myProject
- * GET /api/language-interface/class-content?fqn=com.example.MyClass&methods=getName,setName
+ * POST /api/language-interface/class-content
+ * Body: {"fqn": "com.example.MyClass", "project": "myProject"}
+ * Body: {"path": "/path/to/MyClass.java", "project": "myProject"}
+ * Body: {"fqn": "com.example.MyClass", "methods": ["getName", "setName"]}
  *
  * @author saika
  */
@@ -28,14 +28,13 @@ class GetClassContentHandler : HttpRequestHandler() {
 
     companion object {
         private const val PATH_PREFIX = "/api/language-interface/class-content"
-        private val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
         private val LOG = logger<GetClassContentHandler>()
     }
 
     override fun isAccessible(request: HttpRequest): Boolean = true
 
     override fun isSupported(request: FullHttpRequest): Boolean {
-        return request.method() == HttpMethod.GET && request.uri().contains(PATH_PREFIX)
+        return request.method() == HttpMethod.POST && request.uri().contains(PATH_PREFIX)
     }
 
     override fun process(
@@ -45,38 +44,45 @@ class GetClassContentHandler : HttpRequestHandler() {
     ): Boolean {
         if (!urlDecoder.path().startsWith(PATH_PREFIX)) return false
 
-        val params = urlDecoder.parameters()
-        val fqn = params["fqn"]?.firstOrNull()
-        val path = params["path"]?.firstOrNull()
-
-        if (fqn.isNullOrBlank() && path.isNullOrBlank()) {
-            sendJson(
-                context,
-                mapOf("error" to "Missing required parameter: fqn or path (at least one required)"),
-                HttpResponseStatus.BAD_REQUEST,
-            )
+        val body = try {
+            val content = request.content().toString(Charsets.UTF_8)
+            JsonParser.parseString(content).asJsonObject
+        } catch (e: Exception) {
+            ApiResponse.error(context, ApiResponse.INVALID_JSON, "Invalid JSON body")
             return true
         }
 
-        val projectName = params["project"]?.firstOrNull()
-        val project = findProject(projectName)
+        val fqn = body.get("fqn")?.takeIf { !it.isJsonNull }?.asString
+        val path = body.get("path")?.takeIf { !it.isJsonNull }?.asString?.let { PathUtils.normalizePath(it) }
+
+        if (fqn.isNullOrBlank() && path.isNullOrBlank()) {
+            ApiResponse.error(context, ApiResponse.MISSING_PARAM, "Missing required parameter: fqn or path (at least one required)")
+            return true
+        }
+
+        val projectName = body.get("project")?.takeIf { !it.isJsonNull }?.asString
+        val hasOpenProject = ProjectManager.getInstance().openProjects.any { !it.isDefault }
+        if (!hasOpenProject) {
+            ApiResponse.error(context, ApiResponse.PROJECT_NOT_FOUND, "No open project found")
+            return true
+        }
+        val project = PathUtils.findProject(projectName)
         if (project == null) {
-            sendJson(context, mapOf("error" to "No open project found"), HttpResponseStatus.NOT_FOUND)
+            ApiResponse.error(
+                context,
+                ApiResponse.SPECIFIED_PROJECT_NOT_FOUND,
+                "Specified project not found: $projectName",
+            )
             return true
         }
 
         if (DumbService.isDumb(project)) {
-            sendJson(
-                context,
-                mapOf("error" to "Indexing in progress, please try again later"),
-                HttpResponseStatus.SERVICE_UNAVAILABLE,
-            )
+            ApiResponse.error(context, ApiResponse.INDEXING, "Indexing in progress, please try again later")
             return true
         }
 
-        val methodNames = params["methods"]?.firstOrNull()
-            ?.split(",")
-            ?.map { it.trim() }
+        val methodNames = body.getAsJsonArray("methods")
+            ?.map { it.asString.trim() }
             ?.filter { it.isNotEmpty() }
 
         val result = if (!fqn.isNullOrBlank()) {
@@ -87,11 +93,11 @@ class GetClassContentHandler : HttpRequestHandler() {
 
         if (result == null) {
             val query = if (!fqn.isNullOrBlank()) "fqn=$fqn" else "path=$path"
-            sendJson(context, mapOf("error" to "Class not found: $query"), HttpResponseStatus.NOT_FOUND)
+            ApiResponse.error(context, ApiResponse.CLASS_NOT_FOUND, "Class not found: $query")
             return true
         }
 
-        sendJson(context, result)
+        ApiResponse.success(context, result)
         return true
     }
 
@@ -229,24 +235,4 @@ class GetClassContentHandler : HttpRequestHandler() {
         return map
     }
 
-    private fun findProject(projectName: String?): Project? {
-        val projects = ProjectManager.getInstance().openProjects.filter { !it.isDefault }
-        if (projects.isEmpty()) return null
-        if (projectName.isNullOrBlank()) return projects.first()
-        return projects.find { it.name == projectName } ?: projects.first()
-    }
-
-    private fun sendJson(
-        context: ChannelHandlerContext,
-        data: Any,
-        status: HttpResponseStatus = HttpResponseStatus.OK,
-    ) {
-        val json = gson.toJson(data)
-        val bytes = json.toByteArray(Charsets.UTF_8)
-        val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, Unpooled.wrappedBuffer(bytes))
-        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=utf-8")
-        response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, bytes.size)
-        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
-        context.channel().writeAndFlush(response)
-    }
 }

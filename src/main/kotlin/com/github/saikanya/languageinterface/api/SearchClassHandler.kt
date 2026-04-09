@@ -1,6 +1,6 @@
 package com.github.saikanya.languageinterface.api
 
-import com.google.gson.GsonBuilder
+import com.google.gson.JsonParser
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.DumbService
@@ -8,7 +8,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.PsiShortNamesCache
-import io.netty.buffer.Unpooled
 import io.netty.channel.ChannelHandlerContext
 import io.netty.handler.codec.http.*
 import org.jetbrains.ide.HttpRequestHandler
@@ -22,14 +21,14 @@ class SearchClassHandler : HttpRequestHandler() {
     companion object {
         private const val PATH_PREFIX = "/api/language-interface/search-class"
         private const val DEFAULT_LIMIT = 200
-        private val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
+        private const val MAX_LIMIT = 200
         private val LOG = logger<SearchClassHandler>()
     }
 
     override fun isAccessible(request: HttpRequest): Boolean = true
 
     override fun isSupported(request: FullHttpRequest): Boolean {
-        return request.method() == HttpMethod.GET && request.uri().contains(PATH_PREFIX)
+        return request.method() == HttpMethod.POST && request.uri().contains(PATH_PREFIX)
     }
 
     override fun process(
@@ -39,51 +38,80 @@ class SearchClassHandler : HttpRequestHandler() {
     ): Boolean {
         if (!urlDecoder.path().startsWith(PATH_PREFIX)) return false
 
-        val params = urlDecoder.parameters()
-        val name = params["name"]?.firstOrNull()
+        val body = try {
+            val content = request.content().toString(Charsets.UTF_8)
+            JsonParser.parseString(content).asJsonObject
+        } catch (e: Exception) {
+            ApiResponse.error(context, ApiResponse.INVALID_JSON, "Invalid JSON body")
+            return true
+        }
+
+        val name = body.get("name")?.takeIf { !it.isJsonNull }?.asString
         if (name.isNullOrBlank()) {
-            sendJson(context, mapOf("error" to "Missing required parameter: name"), HttpResponseStatus.BAD_REQUEST)
+            ApiResponse.error(context, ApiResponse.MISSING_PARAM, "Missing required parameter: name")
             return true
         }
 
-        val projectName = params["project"]?.firstOrNull()
-        val limit = params["limit"]?.firstOrNull()?.toIntOrNull() ?: DEFAULT_LIMIT
+        val projectName = body.get("project")?.takeIf { !it.isJsonNull }?.asString
+        val rawLimit = body.get("limit")?.takeIf { !it.isJsonNull }?.asInt ?: DEFAULT_LIMIT
+        val limit = rawLimit.coerceIn(1, MAX_LIMIT)
 
-        val project = findProject(projectName)
+        val matchModeRaw = body.get("matchMode")?.takeIf { !it.isJsonNull }?.asString
+        val matchMode = when {
+            matchModeRaw.isNullOrBlank() -> SearchClassMatchMode.STRICT
+            matchModeRaw.equals("strict", ignoreCase = true) -> SearchClassMatchMode.STRICT
+            matchModeRaw.equals("fuzzy", ignoreCase = true) -> SearchClassMatchMode.FUZZY
+            else -> {
+                ApiResponse.error(
+                    context,
+                    ApiResponse.MISSING_PARAM,
+                    "Invalid matchMode, expected strict or fuzzy",
+                )
+                return true
+            }
+        }
+
+        val hasOpenProject = ProjectManager.getInstance().openProjects.any { !it.isDefault }
+        if (!hasOpenProject) {
+            ApiResponse.error(context, ApiResponse.PROJECT_NOT_FOUND, "No open project found")
+            return true
+        }
+        val project = PathUtils.findProject(projectName)
         if (project == null) {
-            sendJson(context, mapOf("error" to "No open project found"), HttpResponseStatus.NOT_FOUND)
-            return true
-        }
-
-        if (DumbService.isDumb(project)) {
-            sendJson(
+            ApiResponse.error(
                 context,
-                mapOf("error" to "Indexing in progress, please try again later"),
-                HttpResponseStatus.SERVICE_UNAVAILABLE
+                ApiResponse.SPECIFIED_PROJECT_NOT_FOUND,
+                "Specified project not found: $projectName",
             )
             return true
         }
 
-        val results = searchClasses(project, name, limit)
-        sendJson(context, mapOf("query" to name, "total" to results.size, "results" to results))
+        if (DumbService.isDumb(project)) {
+            ApiResponse.error(context, ApiResponse.INDEXING, "Indexing in progress, please try again later")
+            return true
+        }
+
+        val results = searchClasses(project, name, limit, matchMode)
+        ApiResponse.success(context, mapOf("query" to name, "total" to results.size, "results" to results))
         return true
     }
 
-    private fun findProject(projectName: String?): Project? {
-        val projects = ProjectManager.getInstance().openProjects.filter { !it.isDefault }
-        if (projects.isEmpty()) return null
-        if (projectName.isNullOrBlank()) return projects.first()
-        return projects.find { it.name == projectName } ?: projects.first()
-    }
-
-    private fun searchClasses(project: Project, query: String, limit: Int): List<Map<String, Any>> {
+    private fun searchClasses(
+        project: Project,
+        query: String,
+        limit: Int,
+        matchMode: SearchClassMatchMode,
+    ): List<Map<String, Any>> {
         val resultList = mutableListOf<Map<String, Any>>()
 
         ApplicationManager.getApplication().runReadAction {
             val scope = GlobalSearchScope.allScope(project)
             val cache = PsiShortNamesCache.getInstance(project)
             val allNames = cache.allClassNames
-            val matchingNames = allNames.filter { it.contains(query, ignoreCase = true) }
+            val matchingNames = when (matchMode) {
+                SearchClassMatchMode.STRICT -> allNames.filter { it.equals(query, ignoreCase = true) }
+                SearchClassMatchMode.FUZZY -> allNames.filter { it.contains(query, ignoreCase = true) }
+            }
 
             val fqnToPaths = LinkedHashMap<String, MutableList<String>>()
             for (shortName in matchingNames) {
@@ -111,17 +139,4 @@ class SearchClassHandler : HttpRequestHandler() {
         return resultList
     }
 
-    private fun sendJson(
-        context: ChannelHandlerContext,
-        data: Any,
-        status: HttpResponseStatus = HttpResponseStatus.OK,
-    ) {
-        val json = gson.toJson(data)
-        val bytes = json.toByteArray(Charsets.UTF_8)
-        val response = DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, Unpooled.wrappedBuffer(bytes))
-        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=utf-8")
-        response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, bytes.size)
-        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE)
-        context.channel().writeAndFlush(response)
-    }
 }

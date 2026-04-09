@@ -16,7 +16,11 @@ version = providers.gradleProperty("pluginVersion").get()
 
 // Set the JVM language level used to build the project.
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(17)
+
+    compilerOptions {
+        apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_7)
+    }
 }
 
 // Configure project's dependencies
@@ -134,6 +138,14 @@ tasks {
 
     publishPlugin {
         dependsOn(patchChangelog)
+    }
+
+    runIde {
+        jvmArgumentProviders.removeIf { provider ->
+            provider.javaClass.name.let {
+                it.contains("Coroutines") || it.contains("Compose") || it.contains("HotReload")
+            }
+        }
     }
 }
 

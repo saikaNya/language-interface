@@ -6,3 +6,6 @@
 .qodana
 build
 /META-INF
+.github
+.run
+.tmp*

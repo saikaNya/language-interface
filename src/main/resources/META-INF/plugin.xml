@@ -15,14 +15,4 @@
         <httpRequestHandler implementation="com.github.saikanya.languageinterface.api.SearchClassHandler"/>
         <httpRequestHandler implementation="com.github.saikanya.languageinterface.api.GetClassContentHandler"/>
     </extensions>
-
-    <actions>
-        <action id="HelloWorldAction"
-                class="com.github.saikanya.languageinterface.actions.HelloWorldAction"
-                text="Hello World"
-                description="弹出 Hello World 提示框">
-            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
-            <add-to-group group-id="ProjectViewPopupMenu" anchor="first"/>
-        </action>
-    </actions>
 </idea-plugin>
