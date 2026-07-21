@@ -13,7 +13,7 @@ import io.netty.handler.codec.http.*
 import org.jetbrains.ide.HttpRequestHandler
 
 /**
- * @author saikanya
+ * @author saika
  * @date 2024/6/30 17:00
  */
 class SearchClassHandler : HttpRequestHandler() {

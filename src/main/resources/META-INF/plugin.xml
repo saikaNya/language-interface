@@ -14,5 +14,6 @@
         <postStartupActivity implementation="com.github.saikanya.languageinterface.startup.MyProjectActivity" />
         <httpRequestHandler implementation="com.github.saikanya.languageinterface.api.SearchClassHandler"/>
         <httpRequestHandler implementation="com.github.saikanya.languageinterface.api.GetClassContentHandler"/>
+        <httpRequestHandler implementation="com.github.saikanya.languageinterface.api.GetWorkspacesHandler"/>
     </extensions>
 </idea-plugin>
