@@ -4,18 +4,19 @@
   <a href="#中文说明">中文</a> | <a href="#english">English</a>
 </div>
 
+<!-- Plugin description -->
+Language Interface provides Java type search and source code retrieval capabilities for MCP clients through IntelliJ IDEA.
+
 ## 中文说明
 
 ### 简介
 
-<!-- Plugin description -->
 AI Code Agent 通常可以读取当前项目的源码，但无法直接获取外部依赖或 JDK 中的 Java 类源码。因此，AI 在生成代码时经常会出现方法参数数量或类型错误，以及虚构类属性、方法等问题。本项目通过为 Code Agent 提供获取 Java 语法树与类型信息的能力来减少此类问题。
 
 `language-interface` 插件利用 IntelliJ IDEA 的 PSI 语法树和项目索引，为 MCP 客户端提供以下工具：
 
 - `searchJavaTypes`：通过名称或部分名称搜索项目、外部依赖和 JDK 中的 Java 类、接口或枚举。
 - `getSourceCodeByFQN`：通过全限定名获取 Java 类型源码，并支持按方法名筛选。
-<!-- Plugin description end -->
 
 ### 首次安装与设置
 
@@ -218,3 +219,4 @@ receives MCP requests and forwards them to the plugin.
 ```text
 MCP client → mcp-server-for-language → IDEA plugin → Java project indexes
 ```
+<!-- Plugin description end -->
